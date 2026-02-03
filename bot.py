@@ -2,7 +2,7 @@ import feedparser
 import requests
 
 BOT_TOKEN = "8266991943:AAHQzznF97suI5i47N813YqiYe4E6S56hBA"
-CHAT_ID = "7981684652"
+CHAT_ID = "-1003859674623"
 
 RSS_FEEDS = [
     "https://feeds.reuters.com/reuters/businessNews",
