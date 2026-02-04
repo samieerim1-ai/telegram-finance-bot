@@ -5,8 +5,8 @@ import html
 import re
 from datetime import datetime
 
-BOT_TOKEN = os.getenv("8266991943:AAFz34w2ABb4yYpKjh6aJ91YHnjzzP7IHVI")
-CHAT_ID = os.getenv("-1003859674623")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 # -------- RSS FEEDS --------
 RSS_FEEDS = [
