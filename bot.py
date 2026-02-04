@@ -94,7 +94,7 @@ def clean_html(raw_html):
 for feed_url in RSS_FEEDS:
     feed = feedparser.parse(feed_url)
 
-    for entry in feed.entries[:5]:
+    for entry in feed.entries[:20]:
 
         title = entry.title.strip()
         summary = entry.summary if hasattr(entry, "summary") else ""
