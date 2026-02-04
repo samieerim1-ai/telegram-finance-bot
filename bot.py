@@ -7,7 +7,7 @@ import re
 # =========================
 # TELEGRAM SETTINGS
 # =========================
-BOT_TOKEN = "8266991943:AAHQzznF97suI5i47N813YqiYe4E6S56hBA"
+BOT_TOKEN = "8266991943:AAFz34w2ABb4yYpKjh6aJ91YHnjzzP7IHVI"
 CHAT_ID = "-1003859674623"
 
 # =========================
@@ -15,7 +15,11 @@ CHAT_ID = "-1003859674623"
 # =========================
 RSS_FEEDS = [
     "https://feeds.reuters.com/reuters/businessNews",
-    "https://www.cnbc.com/id/10001147/device/rss/rss.html",
+    "https://www.moneycontrol.com/rss/economy.xml",
+    "https://www.moneycontrol.com/rss/market.xml" ,
+    "https://www.moneycontrol.com/rss/business.xml" ,
+
+
     "https://www.imf.org/en/News/RSS",
 ]
 
