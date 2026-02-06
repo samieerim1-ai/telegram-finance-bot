@@ -1,107 +1,164 @@
+import os
 import feedparser
 import requests
-import os
 import re
+from bs4 import BeautifulSoup
 from datetime import datetime
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
+# -------- RSS FEEDS --------
 RSS_FEEDS = [
     "https://www.moneycontrol.com/rss/business.xml",
     "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://www.cnbc.com/id/100003114/device/rss/rss.html"
+    "https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best",
 ]
 
+# -------- KEYWORDS --------
 KEYWORDS = [
-    "economy","gdp","inflation","interest","imf","world bank",
-    "china","india","rupee","rbi","trade","currency","stock",
-    "sensex","nifty","market","gold","oil","federal reserve","trump"
+    "india", "sensex", "nifty", "stock", "gdp", "inflation",
+    "china", "trump", "economy", "imf", "world bank",
+    "interest rate", "rupee"
 ]
 
-US_STOCK_BLOCK = [
-    "dow jones","nasdaq","wall street","nyse","s&p 500"
-]
+# Only India stock filter
+INDIA_STOCK_WORDS = ["sensex", "nifty", "bse", "nse"]
 
-posted_titles = set()
+ENTRY_LIMIT = 5
 
-def send_message(text):
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
-    requests.post(TELEGRAM_URL, data=payload)
+POSTED_FILE = "posted.txt"
 
-def contains_keywords(text):
-    text = text.lower()
-    if any(u in text for u in US_STOCK_BLOCK):
+# -------- TELEGRAM SEND --------
+def send_telegram(text, image=None):
+    if image:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+        data = {"chat_id": CHAT_ID, "caption": text, "parse_mode": "HTML"}
+        files = {"photo": requests.get(image).content}
+        requests.post(url, data=data, files=files)
+    else:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
+        requests.post(url, data=data)
+
+# -------- DUPLICATE CHECK --------
+def is_posted(link):
+    if not os.path.exists(POSTED_FILE):
         return False
+    with open(POSTED_FILE) as f:
+        return link in f.read()
+
+def mark_posted(link):
+    with open(POSTED_FILE, "a") as f:
+        f.write(link + "\n")
+
+# -------- IMAGE PICK --------
+def get_image(entry):
+    if "media_content" in entry:
+        return entry.media_content[0]["url"]
+
+    soup = BeautifulSoup(entry.get("summary", ""), "html.parser")
+    img = soup.find("img")
+    if img:
+        return img["src"]
+
+    return None
+
+# -------- KEYWORD FILTER --------
+def keyword_match(text):
+    text = text.lower()
+
+    # if stock word present but not India stock, skip
+    if "stock" in text:
+        if not any(w in text for w in INDIA_STOCK_WORDS):
+            return False
+
     return any(k in text for k in KEYWORDS)
 
-def clean_html(raw_html):
-    clean = re.compile('<.*?>')
-    return re.sub(clean, '', raw_html)
-
-def make_headline(title):
-    title = title.replace("|","").strip()
-    return f"🚨 {title}"
-
-def split_bullets(summary):
+# -------- BULLETS --------
+def split_bullets(summary, title):
     sentences = re.split(r'[.!?]', summary)
     bullets = []
+    title_words = set(title.lower().split())
+
     for s in sentences:
         s = s.strip()
-        if len(s) > 40 and len(bullets) < 5:
-            bullets.append(f"⚫ {s}")
+        if len(s) < 60:
+            continue
+
+        words = set(s.lower().split())
+        if len(title_words.intersection(words)) > 4:
+            continue
+
+        short = " ".join(s.split()[:18])
+        bullets.append(f"⚫ {short}...")
+
+        if len(bullets) == 4:
+            break
+
     return "\n".join(bullets)
 
+# -------- BOTTOM LINE --------
 def bottom_line(summary):
-    words = summary.split()
-    short = " ".join(words[:25])
+    sentences = re.split(r'[.!?]', summary)
+    if len(sentences) > 2:
+        line = sentences[-2]
+    else:
+        line = sentences[0]
+
+    short = " ".join(line.split()[:20])
     return f"\n\n<b>Bottom Line:</b>\n{short}..."
 
+# -------- FORMAT NEWS --------
 def format_news(title, summary):
-    headline = make_headline(title)
-    bullets = split_bullets(summary)
-    bottom = bottom_line(summary)
+    clean_summary = BeautifulSoup(summary, "html.parser").get_text()
+    intro = clean_summary.replace(title, "")[:220]
 
-    final = f"""
-<b>{headline}</b>
+    bullets = split_bullets(clean_summary, title)
+    bottom = bottom_line(clean_summary)
 
-{summary[:220]}...
+    message = f"""🚨 <b>{title}</b>
+
+{intro}...
 
 {bullets}
-
 {bottom}
 
 — Global Finance Desk
 """
-    return final
+    return message
 
-def process_feed():
-    for url in RSS_FEEDS:
-        feed = feedparser.parse(url)
+# -------- MAIN --------
+def run():
+    count = 0
 
-        for entry in feed.entries[:5]:
+    for feed_url in RSS_FEEDS:
+        feed = feedparser.parse(feed_url)
+
+        for entry in feed.entries:
+            if count >= ENTRY_LIMIT:
+                return
+
             title = entry.title
-            summary = clean_html(entry.summary)
+            summary = entry.get("summary", "")
+            link = entry.link
 
-            if title in posted_titles:
+            if is_posted(link):
                 continue
 
-            combined = title + " " + summary
+            combined_text = (title + " " + summary)
 
-            if contains_keywords(combined):
-                message = format_news(title, summary)
-                send_message(message)
-                posted_titles.add(title)
+            if not keyword_match(combined_text):
+                continue
 
-def main():
-    process_feed()
+            image = get_image(entry)
+            message = format_news(title, summary)
+
+            send_telegram(message, image)
+            mark_posted(link)
+
+            count += 1
+
 
 if __name__ == "__main__":
-    main()
+    run()
