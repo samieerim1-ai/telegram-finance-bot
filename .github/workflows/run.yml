@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v3
 
       - name: Setup Python
@@ -18,12 +18,13 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install libraries
+      - name: Install Libraries
         run: |
-          pip install feedparser requests beautifulsoup4
+          pip install feedparser requests beautifulsoup4 openai
 
-      - name: Run bot
+      - name: Run Bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+          AI_KEY: ${{ secrets.AI_KEY }}
         run: python bot.py
