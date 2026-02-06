@@ -1,125 +1,107 @@
 import feedparser
 import requests
 import os
-import html
 import re
 from datetime import datetime
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# -------- RSS FEEDS --------
+TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
 RSS_FEEDS = [
-    "https://www.moneycontrol.com/rss/latestnews.xml",
-    "https://feeds.reuters.com/reuters/businessNews",
-    "https://www.cnbc.com/id/100003114/device/rss/rss.html",
-    "https://www.livemint.com/rss/markets",
+    "https://www.moneycontrol.com/rss/business.xml",
+    "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "https://www.cnbc.com/id/100003114/device/rss/rss.html"
 ]
 
-# -------- KEYWORDS --------
 KEYWORDS = [
-    "india", "economy", "gdp", "inflation", "interest rate",
-    "stock", "market", "sensex", "nifty", "s&p", "china",
-    "trump", "imf", "world bank", "business", "trade",
+    "economy","gdp","inflation","interest","imf","world bank",
+    "china","india","rupee","rbi","trade","currency","stock",
+    "sensex","nifty","market","gold","oil","federal reserve","trump"
 ]
 
-# -------- CLEAN TEXT FUNCTION --------
-def clean_text(text):
-    if not text:
-        return ""
-    text = html.unescape(text)
-    text = re.sub('<.*?>', '', text)
-    text = text.replace("\n", " ")
-    return text.strip()
+US_STOCK_BLOCK = [
+    "dow jones","nasdaq","wall street","nyse","s&p 500"
+]
 
-# -------- TELEGRAM SEND --------
-def send_telegram_message(text, image_url=None):
-    if image_url:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-        data = {
-            "chat_id": CHAT_ID,
-            "photo": image_url,
-            "caption": text,
-            "parse_mode": "HTML"
-        }
-    else:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        data = {
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML"
-        }
+posted_titles = set()
 
-    requests.post(url, data=data)
+def send_message(text):
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+    requests.post(TELEGRAM_URL, data=payload)
 
-# -------- DUPLICATE TRACK --------
-POSTED_FILE = "posted.txt"
+def contains_keywords(text):
+    text = text.lower()
+    if any(u in text for u in US_STOCK_BLOCK):
+        return False
+    return any(k in text for k in KEYWORDS)
 
-def load_posted():
-    if not os.path.exists(POSTED_FILE):
-        return set()
-    with open(POSTED_FILE, "r") as f:
-        return set(f.read().splitlines())
+def clean_html(raw_html):
+    clean = re.compile('<.*?>')
+    return re.sub(clean, '', raw_html)
 
-def save_posted(posted):
-    with open(POSTED_FILE, "w") as f:
-        for p in posted:
-            f.write(p + "\n")
+def make_headline(title):
+    title = title.replace("|","").strip()
+    return f"🚨 {title}"
 
-posted_titles = load_posted()
+def split_bullets(summary):
+    sentences = re.split(r'[.!?]', summary)
+    bullets = []
+    for s in sentences:
+        s = s.strip()
+        if len(s) > 40 and len(bullets) < 5:
+            bullets.append(f"⚫ {s}")
+    return "\n".join(bullets)
 
-# -------- MAIN LOGIC --------
-def main():
-    global posted_titles
-    new_posted = set(posted_titles)
+def bottom_line(summary):
+    words = summary.split()
+    short = " ".join(words[:25])
+    return f"\n\n<b>Bottom Line:</b>\n{short}..."
 
-    for feed_url in RSS_FEEDS:
-        feed = feedparser.parse(feed_url)
+def format_news(title, summary):
+    headline = make_headline(title)
+    bullets = split_bullets(summary)
+    bottom = bottom_line(summary)
 
-        # ENTRY LIMIT = 12
-        for entry in feed.entries[:12]:
+    final = f"""
+<b>{headline}</b>
 
-            title = clean_text(entry.title)
-            summary = clean_text(entry.summary if hasattr(entry, "summary") else "")
+{summary[:220]}...
 
-            combined_text = (title + " " + summary).lower()
+{bullets}
 
-            # KEYWORD FILTER
-            if not any(k in combined_text for k in KEYWORDS):
-                continue
+{bottom}
 
-            # DUPLICATE FILTER
+— Global Finance Desk
+"""
+    return final
+
+def process_feed():
+    for url in RSS_FEEDS:
+        feed = feedparser.parse(url)
+
+        for entry in feed.entries[:5]:
+            title = entry.title
+            summary = clean_html(entry.summary)
+
             if title in posted_titles:
                 continue
 
-            # SHORT SUMMARY
-            summary = summary.split(".")[0]
-            summary = summary[:180]
+            combined = title + " " + summary
 
-            if len(summary) < 40:
-                summary = "Key financial update impacting global or Indian markets."
+            if contains_keywords(combined):
+                message = format_news(title, summary)
+                send_message(message)
+                posted_titles.add(title)
 
-            # HEADLINE FORMAT
-            headline = f"🚨 FINANCE ALERT | {title.title()}"
+def main():
+    process_feed()
 
-            message = f"{headline}\n\n{summary}\n\n— Global Finance Desk"
-
-            # IMAGE EXTRACTION
-            image_url = None
-            if "media_content" in entry:
-                image_url = entry.media_content[0]["url"]
-            elif "links" in entry:
-                for link in entry.links:
-                    if link.type and "image" in link.type:
-                        image_url = link.href
-                        break
-
-            send_telegram_message(message, image_url)
-
-            new_posted.add(title)
-
-    save_posted(new_posted)
-
-# -------- RUN --------
 if __name__ == "__main__":
     main()
