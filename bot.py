@@ -143,3 +143,4 @@ for feed_url in RSS_FEEDS:
 
         send_message(final_text, image)
         posted_titles.add(title)
+send_message("Bot is alive check ✅")
