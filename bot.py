@@ -140,11 +140,11 @@ for feed_url in RSS_FEEDS:
         title = clean_text(raw_title)
         summary = clean_text(raw_summary)
 
-        if title in posted_titles:
+         if title in posted_titles:
             continue
 
-        if not is_relevant(title + summary):
-            continue
+       # if not is_relevant(title + summary):
+           # continue
 
         image = get_image(entry)
 
