@@ -145,7 +145,7 @@ def is_relevant(text):
 for feed_url in RSS_FEEDS:
     feed = feedparser.parse(feed_url)
 
-    for entry in feed.entries[:5]:
+    for entry in feed.entries[:20]:
         title = entry.title
         summary = BeautifulSoup(entry.summary, "html.parser").text
 
