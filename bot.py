@@ -1,58 +1,168 @@
 import os
+import re
 import requests
 import feedparser
-from datetime import datetime
+import openai
+from bs4 import BeautifulSoup
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
+AI_KEY = os.getenv("AI_KEY")
+
+openai.api_key = AI_KEY
+openai.base_url = "https://openrouter.ai/api/v1"
 
 RSS_FEEDS = [
     "https://www.moneycontrol.com/rss/business.xml",
-    "https://www.moneycontrol.com/rss/marketreports.xml",
-    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best"
+    "https://feeds.reuters.com/reuters/businessNews"
 ]
 
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
-    }
-    requests.post(url, data=payload)
+KEYWORDS = [
+    "india","sensex","nifty","gdp","inflation",
+    "china","trump","imf","world bank",
+    "interest rate","stock","economy"
+]
 
-def get_news():
-    all_news = []
+posted_titles = set()
 
-    for feed_url in RSS_FEEDS:
-        feed = feedparser.parse(feed_url)
+# ---------------- IMAGE PICKUP ----------------
+def get_image(entry):
+    if "media_content" in entry:
+        return entry.media_content[0]['url']
 
-        for entry in feed.entries[:2]:  # take 2 from each feed
-            title = entry.get("title", "")
-            summary = entry.get("summary", "")
-            link = entry.get("link", "")
+    soup = BeautifulSoup(entry.get("summary", ""), "html.parser")
+    img = soup.find("img")
+    return img['src'] if img else None
 
-            text = f"📰 <b>{title}</b>\n\n{summary}\n\nRead more: {link}"
-            all_news.append(text)
 
-    return all_news
+# ---------------- AI FORMAT ----------------
+def ai_format_news(title, summary):
+    prompt = f"""
+You are a financial news editor.
 
-def main():
-    print("BOT STARTED")
+Create output EXACTLY in this structure:
 
-    if not BOT_TOKEN or not CHAT_ID:
-        print("TOKEN OR CHAT ID MISSING")
-        return
+Headline (DO NOT repeat summary words)
 
-    news_list = get_news()
+2 short intro lines.
 
-    if not news_list:
-        send_telegram("No news found.")
-        return
+4 bullet key takeaways (⚫ symbol only)
 
-    for news in news_list[:5]:  # send max 5 messages
-        send_telegram(news)
+Bottom Line: 1 sentence insight.
 
-if __name__ == "__main__":
-    main()
+Rules:
+- Simple English
+- No links
+- No repetition
+- No hashtags
+- No emojis except ⚫
+- Max 120 words total
+
+Title: {title}
+Summary: {summary}
+"""
+
+    try:
+        response = openai.chat.completions.create(
+            model="mistralai/mistral-7b-instruct:free",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2
+        )
+
+        text = response.choices[0].message.content.strip()
+
+        # CLEAN DUPLICATES
+        lines = []
+        for l in text.split("\n"):
+            if l.strip() and l.strip() not in lines:
+                lines.append(l.strip())
+
+        return "\n".join(lines)
+
+    except:
+        return None
+
+
+# ---------------- FALLBACK FORMAT ----------------
+def fallback_format(title, summary):
+    sentences = re.split(r'[.!?]', summary)
+    bullets = []
+
+    for s in sentences:
+        s = s.strip()
+        if len(s) > 50:
+            bullets.append(f"⚫ {s[:120]}...")
+        if len(bullets) == 4:
+            break
+
+    if len(bullets) == 0:
+        bullets.append("⚫ Key financial development underway")
+
+    bottom = sentences[-2] if len(sentences) > 2 else sentences[0]
+
+    return f"""
+<b>{title}</b>
+
+{summary[:180]}...
+
+{chr(10).join(bullets)}
+
+<b>Bottom Line:</b>
+{bottom[:140]}...
+
+— Global Finance Desk
+"""
+
+
+# ---------------- TELEGRAM SEND ----------------
+def send_message(text, image=None):
+    if image:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+        data = {
+            "chat_id": CHAT_ID,
+            "caption": text,
+            "parse_mode": "HTML",
+            "photo": image
+        }
+    else:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        data = {
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML"
+        }
+
+    requests.post(url, data=data)
+
+
+# ---------------- KEYWORD FILTER ----------------
+def is_relevant(text):
+    text = text.lower()
+    return any(k in text for k in KEYWORDS)
+
+
+# ---------------- MAIN LOOP ----------------
+for feed_url in RSS_FEEDS:
+    feed = feedparser.parse(feed_url)
+
+    for entry in feed.entries[:5]:
+        title = entry.title
+        summary = BeautifulSoup(entry.summary, "html.parser").text
+
+        if title in posted_titles:
+            continue
+
+        if not is_relevant(title + summary):
+            continue
+
+        image = get_image(entry)
+
+        ai_text = ai_format_news(title, summary)
+
+        if ai_text:
+            final_text = ai_text + "\n\n— Global Finance Desk"
+        else:
+            final_text = fallback_format(title, summary)
+
+        send_message(final_text, image)
+        posted_titles.add(title)
