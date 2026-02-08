@@ -1,12 +1,11 @@
 import os
 import re
-import html
 import requests
 import feedparser
 import openai
 from bs4 import BeautifulSoup
+import html
 
-# ---------------- ENV ----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 AI_KEY = os.getenv("AI_KEY")
@@ -14,50 +13,48 @@ AI_KEY = os.getenv("AI_KEY")
 openai.api_key = AI_KEY
 openai.base_url = "https://openrouter.ai/api/v1"
 
-# ---------------- RSS FEEDS ----------------
 RSS_FEEDS = [
     "https://www.moneycontrol.com/rss/business.xml",
     "https://feeds.reuters.com/reuters/businessNews"
 ]
 
-# ---------------- KEYWORDS ----------------
-KEYWORDS = [
-    "india", "sensex", "nifty", "gdp", "inflation",
-    "china", "trump", "imf", "world bank",
-    "interest rate", "stock", "economy", "rupee"
-]
-
 posted_titles = set()
 
-# ---------------- TEXT CLEAN ----------------
+
+# -------- TEXT CLEANER --------
 def clean_text(text):
-    return html.unescape(text).replace("\n", " ").strip()
+    text = html.unescape(text)  # fixes &#39;
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
-# ---------------- IMAGE PICKUP ----------------
+
+# -------- IMAGE PICKUP --------
 def get_image(entry):
-    try:
-        if "media_content" in entry:
-            return entry.media_content[0]['url']
+    if "media_content" in entry:
+        return entry.media_content[0]['url']
 
-        soup = BeautifulSoup(entry.get("summary", ""), "html.parser")
-        img = soup.find("img")
-        return img['src'] if img else None
-    except:
-        return None
+    soup = BeautifulSoup(entry.get("summary", ""), "html.parser")
+    img = soup.find("img")
+    return img['src'] if img else None
 
-# ---------------- AI FORMAT ----------------
+
+# -------- AI FORMAT --------
 def ai_format_news(title, summary):
     prompt = f"""
 Rewrite this financial news professionally.
 
-Rules:
-- Do NOT repeat headline
-- 2 line intro
-- 4 bullet key takeaways
-- Bottom Line
-- Simple English
-- No links
-- Bullets must be unique facts
+FORMAT STRICTLY:
+
+Headline
+2 line intro
+• Bullet
+• Bullet
+• Bullet
+• Bullet
+
+Bottom Line: 1 line
+
+Simple English. No links.
 
 Title: {title}
 Summary: {summary}
@@ -67,91 +64,77 @@ Summary: {summary}
         response = openai.chat.completions.create(
             model="mistralai/mistral-7b-instruct:free",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3
+            temperature=0.2
         )
         return response.choices[0].message.content
     except:
         return None
 
-# ---------------- FALLBACK FORMAT ----------------
+
+# -------- FALLBACK FORMAT --------
 def fallback_format(title, summary):
-    sentences = [s.strip() for s in re.split(r'[.!?]', summary) if len(s.strip()) > 30]
+    sentences = re.split(r'[.!?]', summary)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 40]
 
-    if not sentences:
-        sentences = [summary]
-
-    intro = sentences[0][:200]
     bullets = []
+    for s in sentences[:4]:
+        short = ' '.join(s.split()[:14])
+        bullets.append(f"• {short}...")
 
-    for s in sentences[1:5]:
-        bullets.append(f"⚫ {s[:140]}")
-
-    bottom = sentences[-1][:150]
+    bottom = sentences[-1] if sentences else summary
 
     return f"""
 <b>{title}</b>
 
-{intro}...
+{summary[:180]}...
 
 {chr(10).join(bullets)}
 
 <b>Bottom Line:</b>
-{bottom}
+{bottom[:120]}...
 
 — Global Finance Desk
 """
 
-# ---------------- TELEGRAM SEND ----------------
+
+# -------- TELEGRAM SEND --------
 def send_message(text, image=None):
-    try:
-        if image:
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-            data = {
-                "chat_id": CHAT_ID,
-                "caption": text,
-                "parse_mode": "HTML",
-                "photo": image
-            }
-        else:
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-            data = {
-                "chat_id": CHAT_ID,
-                "text": text,
-                "parse_mode": "HTML"
-            }
+    if image:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+        data = {
+            "chat_id": CHAT_ID,
+            "caption": text,
+            "parse_mode": "HTML",
+            "photo": image
+        }
+    else:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        data = {
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML"
+        }
 
-        requests.post(url, data=data, timeout=15)
-    except:
-        pass
+    requests.post(url, data=data)
 
-# ---------------- KEYWORD FILTER ----------------
-def is_relevant(text):
-    text = text.lower()
-    return any(k in text for k in KEYWORDS)
 
-# ---------------- MAIN LOOP ----------------
+# -------- MAIN LOOP --------
 for feed_url in RSS_FEEDS:
     feed = feedparser.parse(feed_url)
 
     for entry in feed.entries[:5]:
-        raw_title = entry.title
-        raw_summary = BeautifulSoup(entry.summary, "html.parser").text
-
-        title = clean_text(raw_title)
-        summary = clean_text(raw_summary)
+        title = clean_text(entry.title)
+        summary_html = entry.summary
+        summary = clean_text(BeautifulSoup(summary_html, "html.parser").text)
 
         if title in posted_titles:
             continue
-
-        # if not is_relevant(title + summary):
-        #     continue
-
 
         image = get_image(entry)
 
         ai_text = ai_format_news(title, summary)
 
-        if ai_text and "Bottom" in ai_text:
+        if ai_text and len(ai_text) > 100:
             final_text = ai_text + "\n\n— Global Finance Desk"
         else:
             final_text = fallback_format(title, summary)
