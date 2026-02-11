@@ -6,49 +6,70 @@ from datetime import datetime
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
+AI_KEY = os.getenv("AI_KEY")
 
 RSS_FEEDS = [
-    "https://www.moneycontrol.com/rss/business.xml",
-    "https://feeds.reuters.com/reuters/businessNews"
+    "https://www.moneycontrol.com/rss/business.xml"
 ]
 
 # ---------- CLEAN HTML ----------
-def clean_html(raw_html):
-    if raw_html is None:
+def clean_html(text):
+    if not text:
         return ""
-    clean = re.compile('<.*?>')
-    return re.sub(clean, '', raw_html)
+    text = re.sub('<.*?>', '', text)  # remove tags
+    text = text.replace("&nbsp;", " ")
+    text = text.replace("&amp;", "&")
+    text = text.replace("#39;", "'")
+    return text.strip()
 
-# ---------- FORMAT MESSAGE ----------
-def format_news(title, summary, link):
-    summary = clean_html(summary)
-    summary = summary.replace("&nbsp;", " ")
-    summary = summary.replace("&amp;", "&")
-    summary = summary.strip()
+# ---------- AI FORMAT ----------
+def ai_format(title, summary):
+    prompt = f"""
+Format this Indian stock/business news professionally.
 
-    message = f"""
-<b>{title}</b>
+Rules:
+- Do NOT repeat headline.
+- 2 bullet points only.
+- Short Bottom Line.
+- No links.
+- Clean English.
+- Max 5 lines.
 
-{summary[:220]}...
-
-<a href="{link}">Read Full News</a>
+Title: {title}
+Summary: {summary}
 """
-    return message
 
-# ---------- SEND TELEGRAM ----------
+    url = "https://openrouter.ai/api/v1/chat/completions"
+
+    headers = {
+        "Authorization": f"Bearer {AI_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "model": "mistralai/mistral-7b-instruct",
+        "messages": [{"role": "user", "content": prompt}]
+    }
+
+    try:
+        r = requests.post(url, headers=headers, json=data, timeout=30)
+        result = r.json()
+        content = result["choices"][0]["message"]["content"]
+        return content
+    except Exception as e:
+        print("AI ERROR:", e)
+        return summary[:200]
+
+# ---------- TELEGRAM ----------
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
     payload = {
         "chat_id": CHAT_ID,
         "text": msg,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": False
+        "parse_mode": "HTML"
     }
-
-    response = requests.post(url, json=payload)
-    print("TELEGRAM STATUS:", response.status_code)
-    print("TELEGRAM RESPONSE:", response.text)
+    r = requests.post(url, json=payload)
+    print("TELEGRAM:", r.status_code)
 
 # ---------- MAIN ----------
 def run_bot():
@@ -56,24 +77,25 @@ def run_bot():
 
     for feed_url in RSS_FEEDS:
         print("CHECKING:", feed_url)
-
         feed = feedparser.parse(feed_url)
-        entries = feed.entries[:3]  # send top 3 news
-        print("TOTAL ENTRIES:", len(entries))
 
-        if len(entries) == 0:
-            print("NO ENTRIES FOUND")
-            continue
+        for entry in feed.entries[:3]:
+            title = clean_html(entry.title)
+            summary = clean_html(entry.summary)
 
-        for entry in entries:
-            title = entry.get("title", "No Title")
-            summary = entry.get("summary", "")
-            link = entry.get("link", "")
+            print("TITLE:", title)
 
-            print("TITLE FOUND:", title)
+            ai_text = ai_format(title, summary)
 
-            msg = format_news(title, summary, link)
-            send_telegram(msg)
+            message = f"""
+<b>{title}</b>
+
+{ai_text}
+
+— Global Finance Desk
+"""
+
+            send_telegram(message)
 
     print("RUN COMPLETED")
 
