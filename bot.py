@@ -55,10 +55,10 @@ def ai_format(title, content):
 Rewrite this business news professionally.
 
 FORMAT STRICT:
-<b>{headline}</b> 
+Headline 
 2 line intro
 4 bullet key takeaways
-<b>Bottom Line:</b> {bottom} 
+Bottom Line 
 
 No links. Simple English.
 
