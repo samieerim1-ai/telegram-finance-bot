@@ -58,7 +58,7 @@ Summary: {summary}
 
     try:
         response = client.chat.completions.create(
-            model="mistralai/mistral-7b-instruct:free",
+            model="openchat/openchat-3.5",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3
         )
