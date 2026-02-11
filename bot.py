@@ -58,7 +58,10 @@ Description: {description}
 """
 
         data = {
-            "model": "meta-llama/llama-3.1-8b-instruct:free",
+           MODELS = [
+    "mistralai/mistral-7b-instruct:free",
+    "google/gemma-2-9b-it:free"
+]
             "messages": [
                 {"role": "user", "content": prompt}
             ]
