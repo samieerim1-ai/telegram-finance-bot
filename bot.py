@@ -2,98 +2,98 @@ import os
 import re
 import requests
 import feedparser
-import openai
 from bs4 import BeautifulSoup
+from openai import OpenAI
 import html
 
-# ---------------- ENV ----------------
+# ---------------- ENV VARIABLES ----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 AI_KEY = os.getenv("AI_KEY")
 
-if not BOT_TOKEN or not CHAT_ID:
-    raise ValueError("BOT_TOKEN or CHAT_ID missing")
-
 if not AI_KEY:
-    raise ValueError("AI_KEY not found in Secrets")
+    raise ValueError("AI_KEY NOT FOUND")
 
-# ---------------- OPENROUTER SETUP ----------------
-openai.api_key = AI_KEY
-openai.base_url = "https://openrouter.ai/api/v1"
+# ---------------- OPENROUTER CLIENT ----------------
+client = OpenAI(
+    api_key=AI_KEY,
+    base_url="https://openrouter.ai/api/v1"
+)
 
-print("AI KEY LOADED:", AI_KEY[:8])
-
-# ---------------- RSS ----------------
+# ---------------- RSS FEEDS ----------------
 RSS_FEEDS = [
     "https://www.moneycontrol.com/rss/business.xml",
     "https://feeds.reuters.com/reuters/businessNews"
 ]
 
+# ---------------- KEYWORDS ----------------
 KEYWORDS = [
     "india", "sensex", "nifty", "gdp", "inflation",
-    "stock", "shares", "market", "economy"
+    "china", "trump", "imf", "world bank",
+    "interest rate", "stock", "economy"
 ]
 
 posted_titles = set()
 
 # ---------------- IMAGE PICKUP ----------------
 def get_image(entry):
-    if "media_content" in entry:
-        return entry.media_content[0]['url']
+    try:
+        if "media_content" in entry:
+            return entry.media_content[0]['url']
 
-    soup = BeautifulSoup(entry.get("summary", ""), "html.parser")
-    img = soup.find("img")
-    return img['src'] if img else None
+        soup = BeautifulSoup(entry.get("summary", ""), "html.parser")
+        img = soup.find("img")
+        return img['src'] if img else None
+    except:
+        return None
 
-
-# ---------------- TEXT CLEAN ----------------
+# ---------------- CLEAN TEXT ----------------
 def clean_text(text):
     text = html.unescape(text)
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
-
+    return BeautifulSoup(text, "html.parser").text.strip()
 
 # ---------------- AI FORMAT ----------------
 def ai_format_news(title, summary):
-    prompt = f"""
-You are a professional financial news editor.
+    try:
+        print("AI CALLED")
 
-Rewrite this news in SIMPLE ENGLISH.
+        response = client.chat.completions.create(
+            model="mistralai/mistral-7b-instruct",
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""
+Rewrite this financial news professionally.
 
-Format EXACTLY like this:
+FORMAT STRICTLY:
 
 Headline
 
 2 line introduction
 
-• Point 1  
-• Point 2  
-• Point 3  
-• Point 4  
+⚫ Bullet 1
+⚫ Bullet 2
+⚫ Bullet 3
+⚫ Bullet 4
 
-Bottom Line: 1 sentence summary.
+Bottom Line: one strong closing sentence.
 
-No links. No repeating headline. No extra commentary.
+Simple English. No links. No repetition.
 
 Title: {title}
 Summary: {summary}
 """
-
-    try:
-        response = openai.chat.completions.create(
-            model="mistralai/mistral-7b-instruct:free",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=400
+                }
+            ],
+            temperature=0.3,
+            max_tokens=350
         )
 
-        text = response.choices[0].message.content.strip()
-        return text
+        return response.choices[0].message.content
 
     except Exception as e:
-        print("AI ERROR:", e)
+        print("AI FAILED:", e)
         return None
-
 
 # ---------------- FALLBACK FORMAT ----------------
 def fallback_format(title, summary):
@@ -101,28 +101,26 @@ def fallback_format(title, summary):
     bullets = []
 
     for s in sentences[1:]:
+        s = s.strip()
         if len(s) > 40:
-            bullets.append(f"• {' '.join(s.split()[:12])}...")
+            bullets.append(f"⚫ {s[:120]}...")
         if len(bullets) == 4:
             break
-
-    if not bullets:
-        bullets.append("• Key details emerging...")
 
     bottom = sentences[-2] if len(sentences) > 2 else sentences[0]
 
     return f"""
 <b>{title}</b>
 
-{summary[:180]}...
+{summary[:200]}...
 
 {chr(10).join(bullets)}
 
-<b>Bottom Line:</b> {bottom[:120]}...
+<b>Bottom Line:</b>
+{bottom[:150]}...
 
 — Global Finance Desk
 """
-
 
 # ---------------- TELEGRAM SEND ----------------
 def send_message(text, image=None):
@@ -144,36 +142,28 @@ def send_message(text, image=None):
             }
 
         requests.post(url, data=data)
-
     except Exception as e:
         print("TELEGRAM ERROR:", e)
-
 
 # ---------------- KEYWORD FILTER ----------------
 def is_relevant(text):
     text = text.lower()
     return any(k in text for k in KEYWORDS)
 
-
 # ---------------- MAIN LOOP ----------------
-print("BOT STARTED")
-
 for feed_url in RSS_FEEDS:
-    print("Fetching:", feed_url)
+    print("CHECKING:", feed_url)
     feed = feedparser.parse(feed_url)
 
     for entry in feed.entries[:5]:
         title = clean_text(entry.title)
-        summary = clean_text(BeautifulSoup(entry.summary, "html.parser").text)
-
-        print("Processing:", title)
+        summary = clean_text(entry.summary)
 
         if title in posted_titles:
             continue
 
-        # OPTIONAL FILTER — COMMENT IF YOU WANT ALL NEWS
-        # if not is_relevant(title + summary):
-        #     continue
+        if not is_relevant(title + summary):
+            continue
 
         image = get_image(entry)
 
@@ -187,4 +177,4 @@ for feed_url in RSS_FEEDS:
         send_message(final_text, image)
         posted_titles.add(title)
 
-print("BOT FINISHED")
+print("RUN COMPLETED")
