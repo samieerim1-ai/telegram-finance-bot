@@ -3,23 +3,30 @@ import requests
 import feedparser
 import datetime
 import re
+import html
 
+# ---------------- ENV ----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 GROQ_KEY = os.getenv("GROQ_KEY")
+
+print("BOT STARTED:", datetime.datetime.now())
+print("GROQ KEY LOADED:", bool(GROQ_KEY))
 
 RSS_FEEDS = [
     "https://www.moneycontrol.com/rss/business.xml",
     "https://feeds.reuters.com/reuters/businessNews"
 ]
 
+# ---------------- CLEAN HTML ----------------
 def clean_html(text):
     if not text:
         return ""
+    text = html.unescape(text)
     text = re.sub('<.*?>', '', text)
-    text = text.replace("&#39;", "'")
     return text.strip()
 
+# ---------------- TELEGRAM SEND ----------------
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
@@ -30,25 +37,34 @@ def send_telegram(message):
     r = requests.post(url, json=payload)
     print("TELEGRAM:", r.status_code)
 
-def ai_summarize(title, content):
+# ---------------- GROQ AI ----------------
+def ai_format(title, content):
+
     if not GROQ_KEY:
+        print("NO GROQ KEY - USING FALLBACK")
         return None
+
+    print("AI CALLED")
+
+    prompt = f"""
+Rewrite this business news professionally.
+
+FORMAT STRICT:
+Headline
+2 line intro
+4 bullet key takeaways
+Bottom Line
+
+No links. Simple English.
+
+Title: {title}
+Content: {content}
+"""
 
     headers = {
         "Authorization": f"Bearer {GROQ_KEY}",
         "Content-Type": "application/json"
     }
-
-    prompt = f"""
-Summarize this business news.
-Format:
-3 bullet points
-1 bottom line
-Simple English.
-
-Title: {title}
-Content: {content}
-"""
 
     data = {
         "model": "llama3-8b-8192",
@@ -62,19 +78,48 @@ Content: {content}
             "https://api.groq.com/openai/v1/chat/completions",
             headers=headers,
             json=data,
-            timeout=20
+            timeout=25
         )
 
         if r.status_code == 200:
-            return r.json()["choices"][0]["message"]["content"]
-
-        print("GROQ ERROR:", r.text)
-        return None
+            result = r.json()
+            return result["choices"][0]["message"]["content"]
+        else:
+            print("AI FAILED:", r.text)
+            return None
 
     except Exception as e:
-        print("GROQ EXCEPTION:", e)
+        print("AI EXCEPTION:", e)
         return None
 
+# ---------------- FALLBACK FORMAT ----------------
+def fallback_format(title, summary):
+
+    sentences = re.split(r'[.!?]', summary)
+    bullets = []
+
+    for s in sentences[1:]:
+        if len(s) > 40:
+            bullets.append(f"• {' '.join(s.split()[:15])}...")
+        if len(bullets) == 4:
+            break
+
+    bottom = sentences[-2] if len(sentences) > 2 else sentences[0]
+
+    return f"""
+<b>{title}</b>
+
+{summary[:180]}...
+
+{chr(10).join(bullets)}
+
+<b>Bottom Line:</b>
+{bottom[:120]}...
+
+— Global Finance Desk
+"""
+
+# ---------------- PROCESS FEED ----------------
 def process_feed(url):
     print("CHECKING:", url)
     feed = feedparser.parse(url)
@@ -84,22 +129,21 @@ def process_feed(url):
         return
 
     for entry in feed.entries[:3]:
+
         title = clean_html(entry.title)
-        content = clean_html(entry.summary)
+        summary = clean_html(entry.summary)
 
-        print("AI CALLED")
-        summary = ai_summarize(title, content)
+        ai_text = ai_format(title, summary)
 
-        if summary:
-            message = f"<b>{title}</b>\n\n{summary}\n\n— Global Finance Desk"
+        if ai_text:
+            final_text = ai_text + "\n\n— Global Finance Desk"
         else:
-            message = f"<b>{title}</b>\n\n{content[:200]}..."
+            final_text = fallback_format(title, summary)
 
-        send_telegram(message)
+        send_telegram(final_text)
 
+# ---------------- MAIN ----------------
 def main():
-    print("BOT STARTED:", datetime.datetime.now())
-
     for feed in RSS_FEEDS:
         process_feed(feed)
 
