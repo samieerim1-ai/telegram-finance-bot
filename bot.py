@@ -16,6 +16,11 @@ print("GROQ KEY LOADED:", bool(GROQ_KEY))
 RSS_FEEDS = [
     "https://www.moneycontrol.com/rss/business.xml",
     "https://feeds.reuters.com/reuters/businessNews"
+    "https://www.moneycontrol.com/rss/business.xml",
+ "https://feeds.reuters.com/reuters/businessNews",
+ "https://www.moneycontrol.com/rss/economy.xml",
+ "https://www.livemint.com/rss/economy"
+    
 ]
 
 # ---------------- CLEAN HTML ----------------
@@ -128,7 +133,7 @@ def process_feed(url):
         print("NO ENTRIES")
         return
 
-    for entry in feed.entries[:3]:
+    for entry in feed.entries[:15]:
 
         title = clean_html(entry.title)
         summary = clean_html(entry.summary)
