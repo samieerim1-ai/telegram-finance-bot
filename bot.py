@@ -58,7 +58,7 @@ Summary: {summary}
 
     try:
         response = client.chat.completions.create(
-            model="openchat/openchat-3.5",
+            "model": "meta-llama/llama-3.1-8b-instruct:free"
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3
         )
