@@ -1,104 +1,121 @@
 import os
+import re
 import requests
 import feedparser
-import re
-from datetime import datetime
+from bs4 import BeautifulSoup
+from html import unescape
+from openai import OpenAI
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 AI_KEY = os.getenv("AI_KEY")
 
+print("BOT STARTED")
+
+client = OpenAI(
+    api_key=AI_KEY,
+    base_url="https://openrouter.ai/api/v1"
+)
+
 RSS_FEEDS = [
-    "https://www.moneycontrol.com/rss/business.xml"
+    "https://www.moneycontrol.com/rss/business.xml",
+    "https://feeds.reuters.com/reuters/businessNews"
 ]
 
-# ---------- CLEAN HTML ----------
-def clean_html(text):
-    if not text:
-        return ""
-    text = re.sub('<.*?>', '', text)  # remove tags
-    text = text.replace("&nbsp;", " ")
-    text = text.replace("&amp;", "&")
-    text = text.replace("#39;", "'")
+posted_titles = set()
+
+# ---------- CLEAN TEXT ----------
+def clean_text(text):
+    text = unescape(text)
+    text = re.sub(r'<.*?>', '', text)
+    text = re.sub(r'http\S+', '', text)
     return text.strip()
 
-# ---------- AI FORMAT ----------
-def ai_format(title, summary):
-    prompt = f"""
-Format this Indian stock/business news professionally.
+# ---------- IMAGE ----------
+def get_image(entry):
+    if "media_content" in entry:
+        return entry.media_content[0]['url']
+    return None
 
-Rules:
-- Do NOT repeat headline.
-- 2 bullet points only.
-- Short Bottom Line.
-- No links.
-- Clean English.
-- Max 5 lines.
+# ---------- AI FORMAT ----------
+def ai_format_news(title, summary):
+    print("AI CALLED")
+
+    prompt = f"""
+Rewrite this financial news professionally.
+
+Format:
+Headline
+2 line intro
+4 bullet key takeaways
+Bottom Line
+
+Simple English. No links.
 
 Title: {title}
 Summary: {summary}
 """
 
-    url = "https://openrouter.ai/api/v1/chat/completions"
-
-    headers = {
-        "Authorization": f"Bearer {AI_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    data = {
-        "model": "mistralai/mistral-7b-instruct",
-        "messages": [{"role": "user", "content": prompt}]
-    }
-
     try:
-        r = requests.post(url, headers=headers, json=data, timeout=30)
-        result = r.json()
-        content = result["choices"][0]["message"]["content"]
-        return content
+        response = client.chat.completions.create(
+            model="mistralai/mistral-7b-instruct:free",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3
+        )
+
+        print("AI RESPONSE RECEIVED")
+        return response.choices[0].message.content
+
     except Exception as e:
         print("AI ERROR:", e)
-        return summary[:200]
+        return None
 
 # ---------- TELEGRAM ----------
-def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": msg,
-        "parse_mode": "HTML"
-    }
-    r = requests.post(url, json=payload)
+def send_message(text, image=None):
+    text = re.sub(r'<img.*?>', '', text)
+
+    if image:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+        data = {
+            "chat_id": CHAT_ID,
+            "caption": text,
+            "parse_mode": "HTML",
+            "photo": image
+        }
+    else:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        data = {
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML"
+        }
+
+    r = requests.post(url, data=data)
     print("TELEGRAM:", r.status_code)
 
 # ---------- MAIN ----------
-def run_bot():
-    print("BOT STARTED:", datetime.now())
+for feed_url in RSS_FEEDS:
+    print("CHECKING:", feed_url)
 
-    for feed_url in RSS_FEEDS:
-        print("CHECKING:", feed_url)
-        feed = feedparser.parse(feed_url)
+    feed = feedparser.parse(feed_url)
 
-        for entry in feed.entries[:3]:
-            title = clean_html(entry.title)
-            summary = clean_html(entry.summary)
+    for entry in feed.entries[:3]:
+        title = clean_text(entry.title)
+        summary = clean_text(entry.summary)
 
-            print("TITLE:", title)
+        if title in posted_titles:
+            continue
 
-            ai_text = ai_format(title, summary)
+        image = get_image(entry)
 
-            message = f"""
-<b>{title}</b>
+        ai_text = ai_format_news(title, summary)
 
-{ai_text}
+        if ai_text:
+            final_text = ai_text + "\n\n— Global Finance Desk"
+        else:
+            final_text = f"<b>{title}</b>\n\n{summary[:200]}..."
 
-— Global Finance Desk
-"""
+        send_message(final_text, image)
+        posted_titles.add(title)
 
-            send_telegram(message)
-
-    print("RUN COMPLETED")
-
-# ---------- RUN ----------
-if __name__ == "__main__":
-    run_bot()
+print("RUN COMPLETED")
