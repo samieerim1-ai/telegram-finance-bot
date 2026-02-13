@@ -13,14 +13,12 @@ GROQ_KEY = os.getenv("GROQ_KEY")
 print("BOT STARTED:", datetime.datetime.now())
 print("GROQ KEY LOADED:", bool(GROQ_KEY))
 
+# FIXED RSS LIST (removed duplicates + added commas)
 RSS_FEEDS = [
     "https://www.moneycontrol.com/rss/business.xml",
-    "https://feeds.reuters.com/reuters/businessNews"
-    "https://www.moneycontrol.com/rss/business.xml",
- "https://feeds.reuters.com/reuters/businessNews",
- "https://www.moneycontrol.com/rss/economy.xml",
- "https://www.livemint.com/rss/economy"
-    
+    "https://feeds.reuters.com/reuters/businessNews",
+    "https://www.moneycontrol.com/rss/economy.xml",
+    "https://www.livemint.com/rss/economy"
 ]
 
 # ---------------- CLEAN HTML ----------------
@@ -54,11 +52,18 @@ def ai_format(title, content):
     prompt = f"""
 Rewrite this business news professionally.
 
-FORMAT STRICT:
-Headline 
+STRICT FORMAT (HTML TAGS):
+<b>Headline</b>
+
 2 line intro
-4 bullet key takeaways
-Bottom Line 
+
+• Bullet
+• Bullet
+• Bullet
+• Bullet
+
+<b>Bottom Line:</b>
+1 line summary
 
 No links. Simple English.
 
@@ -105,16 +110,18 @@ def fallback_format(title, summary):
 
     for s in sentences[1:]:
         if len(s) > 40:
-            bullets.append(f"• {' '.join(s.split()[:15])}...")
+            bullets.append(f"• {' '.join(s.split()[:14])}...")
         if len(bullets) == 4:
             break
 
     bottom = sentences[-2] if len(sentences) > 2 else sentences[0]
 
+    intro = summary[:160] + "..."
+
     return f"""
 <b>{title}</b>
 
-{summary[:180]}...
+{intro}
 
 {chr(10).join(bullets)}
 
@@ -133,7 +140,7 @@ def process_feed(url):
         print("NO ENTRIES")
         return
 
-    for entry in feed.entries[:15]:
+    for entry in feed.entries[:10]:
 
         title = clean_html(entry.title)
         summary = clean_html(entry.summary)
