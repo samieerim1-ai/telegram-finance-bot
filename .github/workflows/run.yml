@@ -2,8 +2,15 @@ name: Telegram News Bot
 
 on:
   schedule:
-    # Every 4 hours
-    - cron: '0 */4 * * *'
+    # 8:00 AM IST = 02:30 UTC
+    - cron: "30 2 * * *"
+
+    # 1:30 PM IST = 08:00 UTC
+    - cron: "0 8 * * *"
+
+    # 6:15 PM IST = 12:45 UTC
+    - cron: "45 12 * * *"
+
   workflow_dispatch:
 
 jobs:
@@ -11,17 +18,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install Dependencies
         run: |
-          pip install feedparser requests beautifulsoup4
+          pip install requests feedparser
 
       - name: Run Bot
         env:
